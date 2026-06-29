@@ -3,29 +3,41 @@ import Cocoa
 final class ScrollInterceptor {
     private var eventTap: CFMachPort?
     private var runLoopSource: CFRunLoopSource?
+    private var tapSelf: Unmanaged<ScrollInterceptor>?
 
     var isRunning: Bool { eventTap != nil }
 
     func start() -> Bool {
+        guard !isRunning else {
+            // Re-enable in case the tap was disabled without handle() firing.
+            if let tap = eventTap { CGEvent.tapEnable(tap: tap, enable: true) }
+            return true
+        }
         guard AXIsProcessTrusted() else { return false }
 
         let mask = CGEventMask(1 << CGEventType.scrollWheel.rawValue)
-            | CGEventMask(1 << CGEventType.tapDisabledByTimeout.rawValue)
-            | CGEventMask(1 << CGEventType.tapDisabledByUserInput.rawValue)
 
+        let retained = Unmanaged.passRetained(self)
         guard let tap = CGEvent.tapCreate(
-            tap: .cghidEventTap,
+            tap: .cgSessionEventTap,
             place: .headInsertEventTap,
             options: .defaultTap,
             eventsOfInterest: mask,
             callback: eventTapCallback,
-            userInfo: Unmanaged.passRetained(self).toOpaque()
-        ) else { return false }
+            userInfo: retained.toOpaque()
+        ) else {
+            retained.release()
+            return false
+        }
 
-        let source = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0)
+        guard let source = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0) else {
+            retained.release()
+            return false
+        }
         CFRunLoopAddSource(CFRunLoopGetMain(), source, .commonModes)
         CGEvent.tapEnable(tap: tap, enable: true)
 
+        tapSelf = retained
         eventTap = tap
         runLoopSource = source
         return true
@@ -34,10 +46,13 @@ final class ScrollInterceptor {
     func stop() {
         if let tap = eventTap {
             CGEvent.tapEnable(tap: tap, enable: false)
+            CFMachPortInvalidate(tap)
         }
         if let source = runLoopSource {
             CFRunLoopRemoveSource(CFRunLoopGetMain(), source, .commonModes)
         }
+        tapSelf?.release()
+        tapSelf = nil
         eventTap = nil
         runLoopSource = nil
     }
@@ -48,10 +63,12 @@ final class ScrollInterceptor {
             return event
         }
 
-        // isContinuous == 1: trackpad or Magic Mouse — pass through unchanged.
-        // Regular mouse wheels report isContinuous == 0 (discrete line events).
         let isContinuous = event.getIntegerValueField(.scrollWheelEventIsContinuous)
-        guard isContinuous == 0 else { return event }
+        let phase = event.getIntegerValueField(.scrollWheelEventScrollPhase)
+        let momentumPhase = event.getIntegerValueField(.scrollWheelEventMomentumPhase)
+        // Pass through trackpad and Magic Mouse, which set a non-zero scroll or momentum phase.
+        // Smooth-scrolling mice report isContinuous but have no phase — treat them like discrete mice.
+        guard isContinuous == 0 || (phase == 0 && momentumPhase == 0) else { return event }
 
         let dy = event.getIntegerValueField(.scrollWheelEventDeltaAxis1)
         let dx = event.getIntegerValueField(.scrollWheelEventDeltaAxis2)

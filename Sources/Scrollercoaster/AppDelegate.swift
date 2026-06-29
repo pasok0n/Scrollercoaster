@@ -1,15 +1,21 @@
 import Cocoa
 import ServiceManagement
 
-final class AppDelegate: NSObject, NSApplicationDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let interceptor = ScrollInterceptor()
+    private let globalPreferences = UserDefaults(suiteName: ".GlobalPreferences")
     private var statusItem: NSStatusItem?
     private var warningItem: NSMenuItem?
     private var loginItem: NSMenuItem?
+    private var accessibilityTimer: Timer?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         setupMenuBar()
         requestAccessibilityIfNeeded()
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        interceptor.stop()
     }
 
     private func setupMenuBar() {
@@ -18,6 +24,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         item.button?.image?.isTemplate = true
 
         let menu = NSMenu()
+        menu.delegate = self
 
         let titleItem = NSMenuItem(title: "Scrollercoaster", action: nil, keyEquivalent: "")
         titleItem.isEnabled = false
@@ -37,7 +44,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let login = NSMenuItem(title: "Start at Login", action: #selector(toggleLoginItem), keyEquivalent: "")
         login.target = self
-        login.state = isLoginItemEnabled ? .on : .off
         loginItem = login
         menu.addItem(login)
 
@@ -48,8 +54,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         item.menu = menu
         statusItem = item
+    }
 
+    func menuWillOpen(_ menu: NSMenu) {
         checkNaturalScrollingWarning()
+        loginItem?.state = isLoginItemEnabled ? .on : .off
     }
 
     private var isLoginItemEnabled: Bool {
@@ -64,11 +73,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         do {
             if SMAppService.mainApp.status == .enabled {
                 try SMAppService.mainApp.unregister()
+                loginItem?.state = .off
             } else {
                 try SMAppService.mainApp.register()
+                loginItem?.state = .on
             }
-            loginItem?.state = isLoginItemEnabled ? .on : .off
         } catch {
+            loginItem?.state = isLoginItemEnabled ? .on : .off
             NSAlert(error: error).runModal()
         }
     }
@@ -80,10 +91,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if trusted {
             launchInterceptor()
         } else {
-            Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] timer in
+            var attempts = 0
+            accessibilityTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] timer in
+                attempts += 1
                 if AXIsProcessTrusted() {
                     timer.invalidate()
+                    self?.accessibilityTimer = nil
                     self?.launchInterceptor()
+                } else if attempts >= 120 {
+                    timer.invalidate()
+                    self?.accessibilityTimer = nil
                 }
             }
         }
@@ -97,12 +114,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func checkNaturalScrollingWarning() {
-        let defaults = UserDefaults(suiteName: ".GlobalPreferences")
-        let naturalScrolling = defaults?.bool(forKey: "com.apple.swipescrolldirection") ?? true
+        let naturalScrolling = globalPreferences?.bool(forKey: "com.apple.swipescrolldirection") ?? true
         warningItem?.isHidden = naturalScrolling
     }
 
     @objc private func openScrollSettings() {
-        NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.trackpad")!)
+        let url: URL
+        if #available(macOS 13, *) {
+            url = URL(string: "x-apple.systempreferences:com.apple.Trackpad-Settings.extension")!
+        } else {
+            url = URL(string: "x-apple.systempreferences:com.apple.preference.trackpad")!
+        }
+        NSWorkspace.shared.open(url)
     }
 }
