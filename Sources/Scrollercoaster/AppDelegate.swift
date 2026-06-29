@@ -15,6 +15,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        accessibilityTimer?.invalidate()
         interceptor.stop()
     }
 
@@ -44,6 +45,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         let login = NSMenuItem(title: "Start at Login", action: #selector(toggleLoginItem), keyEquivalent: "")
         login.target = self
+        if #unavailable(macOS 13) {
+            login.isEnabled = false
+        }
         loginItem = login
         menu.addItem(login)
 
@@ -107,9 +111,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     private func launchInterceptor() {
-        let ok = interceptor.start()
-        if !ok {
+        guard interceptor.start() else {
             statusItem?.button?.image = NSImage(systemSymbolName: "exclamationmark.triangle", accessibilityDescription: "Error")
+            statusItem?.button?.toolTip = "Scrollercoaster failed to start. Re-grant Accessibility access in System Settings."
+            return
         }
     }
 
@@ -119,12 +124,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     @objc private func openScrollSettings() {
-        let url: URL
+        let urlString: String
         if #available(macOS 13, *) {
-            url = URL(string: "x-apple.systempreferences:com.apple.Trackpad-Settings.extension")!
+            urlString = "x-apple.systempreferences:com.apple.Trackpad-Settings.extension"
         } else {
-            url = URL(string: "x-apple.systempreferences:com.apple.preference.trackpad")!
+            urlString = "x-apple.systempreferences:com.apple.preference.trackpad"
         }
+        guard let url = URL(string: urlString) else { return }
         NSWorkspace.shared.open(url)
     }
 }

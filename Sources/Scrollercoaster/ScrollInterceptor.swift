@@ -10,7 +10,7 @@ final class ScrollInterceptor {
     func start() -> Bool {
         guard !isRunning else {
             // Re-enable in case the tap was disabled without handle() firing.
-            if let tap = eventTap { CGEvent.tapEnable(tap: tap, enable: true) }
+            CGEvent.tapEnable(tap: eventTap!, enable: true)
             return true
         }
         guard AXIsProcessTrusted() else { return false }
@@ -31,6 +31,7 @@ final class ScrollInterceptor {
         }
 
         guard let source = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0) else {
+            CFMachPortInvalidate(tap)
             retained.release()
             return false
         }
