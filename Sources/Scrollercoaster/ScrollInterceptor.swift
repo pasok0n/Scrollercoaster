@@ -7,6 +7,9 @@ final class ScrollInterceptor {
 
     var isRunning: Bool { eventTap != nil }
 
+    var disableAcceleration: Bool = false
+    var scrollSpeed: Double = 10.0
+
     func start() -> Bool {
         guard !isRunning else {
             // Re-enable in case the tap was disabled without handle() firing.
@@ -85,6 +88,25 @@ final class ScrollInterceptor {
         event.setDoubleValueField(.scrollWheelEventPointDeltaAxis1, value: -pdy)
         event.setDoubleValueField(.scrollWheelEventPointDeltaAxis2, value: -pdx)
 
+        if disableAcceleration {
+            // Re-read the already-inverted integer deltas to get the scroll direction.
+            let lineDy = event.getIntegerValueField(.scrollWheelEventDeltaAxis1)
+            let lineDx = event.getIntegerValueField(.scrollWheelEventDeltaAxis2)
+            // Normalise to ±1 so any per-event acceleration is stripped, then apply the
+            // user-configured speed. This replaces all six delta fields so that every
+            // consumer (deltaY, scrollingDeltaY, pixel delta) sees the same linear value.
+            let signDy = Int64(lineDy.signum())
+            let signDx = Int64(lineDx.signum())
+            let speed = max(1.0, scrollSpeed.rounded())
+            let speedInt = Int64(speed)
+            event.setIntegerValueField(.scrollWheelEventDeltaAxis1, value: signDy * speedInt)
+            event.setIntegerValueField(.scrollWheelEventDeltaAxis2, value: signDx * speedInt)
+            event.setDoubleValueField(.scrollWheelEventFixedPtDeltaAxis1, value: Double(signDy) * speed)
+            event.setDoubleValueField(.scrollWheelEventFixedPtDeltaAxis2, value: Double(signDx) * speed)
+            event.setDoubleValueField(.scrollWheelEventPointDeltaAxis1, value: Double(signDy) * speed)
+            event.setDoubleValueField(.scrollWheelEventPointDeltaAxis2, value: Double(signDx) * speed)
+        }
+
         return event
     }
 }
@@ -95,10 +117,10 @@ private func eventTapCallback(
     event: CGEvent,
     refcon: UnsafeMutableRawPointer?
 ) -> Unmanaged<CGEvent>? {
-    guard let refcon else { return Unmanaged.passRetained(event) }
+    guard let refcon else { return Unmanaged.passUnretained(event) }
     let interceptor = Unmanaged<ScrollInterceptor>.fromOpaque(refcon).takeUnretainedValue()
     if let out = interceptor.handle(type: type, event: event) {
-        return Unmanaged.passRetained(out)
+        return Unmanaged.passUnretained(out)
     }
     return nil
 }
