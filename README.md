@@ -9,7 +9,13 @@ macOS only has one global scroll direction setting, so this is otherwise impossi
 
 ## How it works
 
-Scrollercoaster intercepts scroll events system-wide using a `CGEventTap` at the hardware (HID) level. Events from continuous devices like trackpads and Magic Mice carry an `isContinuous` flag that regular mice never set — that's how it tells them apart. Regular mouse scroll events are flipped; everything else passes through untouched.
+Scrollercoaster intercepts scroll events system-wide using a `CGEventTap` at the hardware (HID) level. Events from trackpads and Magic Mice carry a non-zero scroll phase or momentum phase that regular mice never set — that's how it tells them apart. Regular mouse scroll events are flipped; everything else passes through untouched.
+
+## Features
+
+- **Automatic per-device scroll direction** — no manual switching needed
+- **Disable Scroll Acceleration** — replaces macOS's acceleration curve with a fixed, linear scroll speed for regular mice. Each notch of the scroll wheel always scrolls the same amount regardless of how fast you spin it.
+- **Adjustable scroll speed** — when acceleration is disabled, a slider (1–100) lets you dial in exactly how much each notch scrolls. You can drag the slider or click the number and type a value directly.
 
 ## Requirements
 
@@ -49,6 +55,8 @@ Grant Accessibility access when prompted, then quit and reopen the app. It runs 
 
 Click the menu bar icon to access:
 
+- **Disable Scroll Acceleration** — toggle to enable linear scrolling for regular mice
+  - **Speed slider** — drag or type a value (1–100) to set how much each scroll notch moves; only active when acceleration is disabled
 - **Start at Login** — toggle to have Scrollercoaster launch automatically on login
 - **Quit** — stop the app
 
