@@ -2,6 +2,8 @@ import Cocoa
 import ServiceManagement
 
 final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSTextFieldDelegate {
+    private static let hideStatusIconKey = "hideStatusIcon"
+
     private let interceptor = ScrollInterceptor()
     private let globalPreferences = UserDefaults(suiteName: ".GlobalPreferences")
     private var statusItem: NSStatusItem?
@@ -16,7 +18,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSText
     func applicationDidFinishLaunching(_ notification: Notification) {
         setupMenuBar()
         requestAccessibilityIfNeeded()
-        DispatchQueue.main.async { [weak self] in self?.showMenuIfIconHidden() }
+        // Popping the menu on a login-item launch would steal focus at every boot;
+        // only do it when the user deliberately opened the app.
+        if !launchedAsLoginItem {
+            DispatchQueue.main.async { [weak self] in self?.showMenuIfIconHidden() }
+        }
+    }
+
+    private var launchedAsLoginItem: Bool {
+        // Only valid while the launch event is being handled, i.e. inside
+        // applicationDidFinishLaunching.
+        guard let event = NSAppleEventManager.shared().currentAppleEvent,
+              event.eventID == AEEventID(kAEOpenApplication) else { return false }
+        return event.paramDescriptor(forKeyword: AEKeyword(keyAEPropData))?.enumCodeValue
+            == OSType(keyAELaunchedAsLogInItem)
     }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -33,7 +48,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSText
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         item.button?.image = NSImage(systemSymbolName: "computermouse", accessibilityDescription: "Scrollercoaster")
         item.button?.image?.isTemplate = true
-        item.isVisible = !UserDefaults.standard.bool(forKey: "hideStatusIcon")
+        item.isVisible = !UserDefaults.standard.bool(forKey: Self.hideStatusIconKey)
 
         let menu = NSMenu()
         menu.delegate = self
@@ -124,7 +139,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSText
     func menuWillOpen(_ menu: NSMenu) {
         checkNaturalScrollingWarning()
         loginItem?.state = isLoginItemEnabled ? .on : .off
-        hideIconItem?.state = UserDefaults.standard.bool(forKey: "hideStatusIcon") ? .on : .off
+        hideIconItem?.state = UserDefaults.standard.bool(forKey: Self.hideStatusIconKey) ? .on : .off
         let accelDisabled = UserDefaults.standard.bool(forKey: "disableScrollAcceleration")
         noAccelItem?.state = accelDisabled ? .on : .off
         let speed = UserDefaults.standard.object(forKey: "scrollSpeed") as? Double ?? 10.0
@@ -158,17 +173,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSText
     }
 
     @objc private func toggleHideIcon() {
-        let hidden = !UserDefaults.standard.bool(forKey: "hideStatusIcon")
-        UserDefaults.standard.set(hidden, forKey: "hideStatusIcon")
+        let hidden = !UserDefaults.standard.bool(forKey: Self.hideStatusIconKey)
+        UserDefaults.standard.set(hidden, forKey: Self.hideStatusIconKey)
         hideIconItem?.state = hidden ? .on : .off
         statusItem?.isVisible = !hidden
     }
 
     private func showMenuIfIconHidden() {
-        guard UserDefaults.standard.bool(forKey: "hideStatusIcon"), let menu = statusItem?.menu else { return }
+        guard UserDefaults.standard.bool(forKey: Self.hideStatusIconKey), let menu = statusItem?.menu else { return }
+        // screens.first is the screen that owns the menu bar; NSScreen.main is
+        // merely the screen with keyboard focus.
+        guard let screenFrame = NSScreen.screens.first?.frame else { return }
         NSApp.activate(ignoringOtherApps: true)
-        let screenFrame = NSScreen.main?.frame ?? NSScreen.screens.first?.frame ?? .zero
-        let location = NSPoint(x: screenFrame.maxX - 20, y: screenFrame.maxY - NSStatusBar.system.thickness)
+        let location = NSPoint(
+            x: screenFrame.maxX - menu.size.width - 20,
+            y: screenFrame.maxY - NSStatusBar.system.thickness
+        )
         menu.popUp(positioning: nil, at: location, in: nil)
     }
 
@@ -180,7 +200,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSText
             launchInterceptor()
         } else {
             var attempts = 0
-            accessibilityTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] timer in
+            let timer = Timer(timeInterval: 1.0, repeats: true) { [weak self] timer in
                 attempts += 1
                 if AXIsProcessTrusted() {
                     timer.invalidate()
@@ -189,9 +209,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSText
                 } else if attempts >= 120 {
                     timer.invalidate()
                     self?.accessibilityTimer = nil
+                    self?.showFailureAlert(
+                        message: "Scrollercoaster is not running",
+                        informative: "Accessibility access was not granted. Grant it to Scrollercoaster in System Settings → Privacy & Security → Accessibility, then relaunch the app."
+                    )
                 }
             }
+            // .common so the poll keeps running while a menu is being tracked.
+            RunLoop.main.add(timer, forMode: .common)
+            accessibilityTimer = timer
         }
+    }
+
+    private func showFailureAlert(message: String, informative: String) {
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = message
+        alert.informativeText = informative
+        NSApp.activate(ignoringOtherApps: true)
+        alert.runModal()
     }
 
     private func launchInterceptor() {
@@ -200,6 +236,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSText
         guard interceptor.start() else {
             statusItem?.button?.image = NSImage(systemSymbolName: "exclamationmark.triangle", accessibilityDescription: "Error")
             statusItem?.button?.toolTip = "Scrollercoaster failed to start. Re-grant Accessibility access in System Settings."
+            showFailureAlert(
+                message: "Scrollercoaster failed to start",
+                informative: "Re-grant Accessibility access to Scrollercoaster in System Settings → Privacy & Security → Accessibility, then relaunch the app."
+            )
             return
         }
     }
