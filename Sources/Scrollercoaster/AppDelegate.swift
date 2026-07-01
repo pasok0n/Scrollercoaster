@@ -10,11 +10,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSText
     private var speedSlider: NSSlider?
     private var speedValueLabel: NSTextField?
     private var loginItem: NSMenuItem?
+    private var hideIconItem: NSMenuItem?
     private var accessibilityTimer: Timer?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         setupMenuBar()
         requestAccessibilityIfNeeded()
+        DispatchQueue.main.async { [weak self] in self?.showMenuIfIconHidden() }
     }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -22,10 +24,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSText
         interceptor.stop()
     }
 
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        showMenuIfIconHidden()
+        return true
+    }
+
     private func setupMenuBar() {
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         item.button?.image = NSImage(systemSymbolName: "computermouse", accessibilityDescription: "Scrollercoaster")
         item.button?.image?.isTemplate = true
+        item.isVisible = !UserDefaults.standard.bool(forKey: "hideStatusIcon")
 
         let menu = NSMenu()
         menu.delegate = self
@@ -99,6 +107,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSText
         loginItem = login
         menu.addItem(login)
 
+        let hideIcon = NSMenuItem(title: "Hide Menu Bar Icon", action: #selector(toggleHideIcon), keyEquivalent: "")
+        hideIcon.target = self
+        hideIconItem = hideIcon
+        menu.addItem(hideIcon)
+
         menu.addItem(.separator())
 
         let quit = NSMenuItem(title: "Quit", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
@@ -111,6 +124,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSText
     func menuWillOpen(_ menu: NSMenu) {
         checkNaturalScrollingWarning()
         loginItem?.state = isLoginItemEnabled ? .on : .off
+        hideIconItem?.state = UserDefaults.standard.bool(forKey: "hideStatusIcon") ? .on : .off
         let accelDisabled = UserDefaults.standard.bool(forKey: "disableScrollAcceleration")
         noAccelItem?.state = accelDisabled ? .on : .off
         let speed = UserDefaults.standard.object(forKey: "scrollSpeed") as? Double ?? 10.0
@@ -141,6 +155,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSText
             loginItem?.state = isLoginItemEnabled ? .on : .off
             NSAlert(error: error).runModal()
         }
+    }
+
+    @objc private func toggleHideIcon() {
+        let hidden = !UserDefaults.standard.bool(forKey: "hideStatusIcon")
+        UserDefaults.standard.set(hidden, forKey: "hideStatusIcon")
+        hideIconItem?.state = hidden ? .on : .off
+        statusItem?.isVisible = !hidden
+    }
+
+    private func showMenuIfIconHidden() {
+        guard UserDefaults.standard.bool(forKey: "hideStatusIcon"), let menu = statusItem?.menu else { return }
+        NSApp.activate(ignoringOtherApps: true)
+        let screenFrame = NSScreen.main?.frame ?? NSScreen.screens.first?.frame ?? .zero
+        let location = NSPoint(x: screenFrame.maxX - 20, y: screenFrame.maxY - NSStatusBar.system.thickness)
+        menu.popUp(positioning: nil, at: location, in: nil)
     }
 
     private func requestAccessibilityIfNeeded() {

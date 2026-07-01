@@ -58,6 +58,7 @@ Click the menu bar icon to access:
 - **Disable Scroll Acceleration** — toggle to enable linear scrolling for regular mice
   - **Speed slider** — drag or type a value (1–100) to set how much each scroll notch moves; only active when acceleration is disabled
 - **Start at Login** — toggle to have Scrollercoaster launch automatically on login
+- **Hide Menu Bar Icon** — toggle to remove the icon from the menu bar. While hidden, opening `Scrollercoaster.app` again (even if it's already running) pops the menu up automatically so you can turn the icon back on or change settings.
 - **Quit** — stop the app
 
 If Natural Scrolling is turned off in System Settings, a warning will appear in the menu linking you to the relevant settings pane.
